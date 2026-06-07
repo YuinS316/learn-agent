@@ -1,18 +1,6 @@
 from learn_agent.agent_loop import agent_loop
 from learn_agent.loop_state import LoopState
-
-
-def extract_text(content) -> str:
-    """Extract text content from message content."""
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        texts = []
-        for item in content:
-            if item.get("type") == "text":
-                texts.append(item.get("text", ""))
-        return "\n".join(texts).strip()
-    return ""
+from learn_agent.utils.extract_text import extract_text
 
 
 def main():
