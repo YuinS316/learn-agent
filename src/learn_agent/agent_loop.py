@@ -1,5 +1,4 @@
 import os
-import subprocess
 import json
 
 from openai import OpenAI
@@ -7,6 +6,7 @@ from dotenv import load_dotenv
 
 from learn_agent.config.settings import settings
 from learn_agent.loop_state import LoopState
+from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS
 
 try:
     import readline
@@ -28,40 +28,6 @@ client = OpenAI(
     api_key=settings.openai_api_key,
     base_url=settings.openai_base_url,
 )
-# ── Tool definition: just bash (OpenAI format) ────────────────────────────
-TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "bash",
-        "description": "Run a shell command.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                }
-            },
-            "required": ["command"],
-        },
-    }
-}]
-
-
-# ── Tool execution ────────────────────────────────────────
-def run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(d in command for d in dangerous):
-        return "Error: Dangerous command blocked"
-    try:
-        r = subprocess.run(command, shell=True, cwd=CWD,
-                           capture_output=True, text=True, timeout=120)
-        out = (r.stdout + r.stderr).strip()
-        return out[:50000] if out else "(no output)"
-    except subprocess.TimeoutExpired:
-        return "Error: Timeout (120s)"
-    except (FileNotFoundError, OSError) as e:
-        return f"Error: {e}"
 
 
 def execute_tool_calls(tool_calls) -> list[dict]:
@@ -69,14 +35,16 @@ def execute_tool_calls(tool_calls) -> list[dict]:
 
     for tool_call in tool_calls:
         function_name = tool_call.function.name
-        if function_name != "bash":
+        handler = TOOL_HANDLERS.get(function_name)
+        if handler is None:
+            print(f"\033[33m Unknown tool: {function_name} \033[0m")
             continue
 
         arguments = json.loads(tool_call.function.arguments)
-        command = arguments.get("command", "")
 
-        print(f"\033[33m$ {command}\033[0m")
-        output = run_bash(command)
+        print(f"\033[33m> {function_name}({json.dumps(arguments, ensure_ascii=False)})\033[0m")
+
+        output = handler(**arguments)
         print(output[:5000])
         results.append({
             "role": "tool",

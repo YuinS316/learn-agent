@@ -16,8 +16,9 @@ def extract_text(content) -> str:
 
 
 def main():
-    print("s01: Agent Loop (OpenAI version)")
+    print("Agent Loop (OpenAI version)")
     print("输入问题，回车发送。输入 q 退出。\n")
+
 
     history = []
     while True:
