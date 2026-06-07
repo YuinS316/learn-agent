@@ -1,10 +1,12 @@
 import os
 import subprocess
 import json
+
 from openai import OpenAI
 from dotenv import load_dotenv
 
 from learn_agent.config.settings import settings
+from learn_agent.loop_state import LoopState
 
 try:
     import readline
@@ -26,7 +28,6 @@ client = OpenAI(
     api_key=settings.openai_api_key,
     base_url=settings.openai_base_url,
 )
-
 # ── Tool definition: just bash (OpenAI format) ────────────────────────────
 TOOLS = [{
     "type": "function",
@@ -62,46 +63,89 @@ def run_bash(command: str) -> str:
     except (FileNotFoundError, OSError) as e:
         return f"Error: {e}"
 
-def agent_loop(messages: list):
-    # Prepend system message if not already present
+
+def execute_tool_calls(tool_calls) -> list[dict]:
+    results = []
+
+    for tool_call in tool_calls:
+        function_name = tool_call.function.name
+        if function_name != "bash":
+            continue
+
+        arguments = json.loads(tool_call.function.arguments)
+        command = arguments.get("command", "")
+
+        print(f"\033[33m$ {command}\033[0m")
+        output = run_bash(command)
+        print(output[:5000])
+        results.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": output,
+        })
+
+    return results
+
+def run_one_turn(state: LoopState) -> bool:
+    """Run one turn of the agent loop. Returns True if should continue."""
+
+    messages = state.messages
+
+    # Add system message at the beginning if not present
     if not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": SYSTEM})
 
-    while True:
-        response = client.chat.completions.create(
-            tools=TOOLS,
-            tool_choice="auto",  # 让模型自动决定是否调用工具
-            messages=messages,
-            max_tokens=8000,
-            model=settings.openai_model,
-        )
+    response = client.chat.completions.create(
+        model=settings.openai_model,
+        messages=messages,
+        tools=TOOLS,
+        tool_choice="auto",
+        max_tokens=8000,
+    )
 
-        message = response.choices[0].message
+    message = response.choices[0].message
 
-        # Append assistant turn
-        messages.append(message.model_dump())
+    #  It doesn't need to execute tools — save final response and stop
+    if not message.tool_calls:
+        state.messages.append({
+            "role": "assistant",
+            "content": message.content or "",
+        })
+        state.transition_reason = None
+        return False
 
-        # If the model didn't call a tool, we're done
-        if not message.tool_calls:
-            return
+    # Convert assistant message to dict for storage
+    assistant_dict = {
+        "role": "assistant",
+        "content": message.content or "",
+        "tool_calls": [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                }
+            }
+            for tc in message.tool_calls
+        ]
+    }
 
-        # Execute each tool call, collect results
-        for tool_call in message.tool_calls:
-            function_name = tool_call.function.name
-            arguments = json.loads(tool_call.function.arguments)
+    state.messages.append(assistant_dict)
 
-            if function_name == "bash":
-                command = arguments.get("command", "")
-                print(f"\033[33m$ {command}\033[0m")
-                output = run_bash(command)
-                print(output[:200])
+    # Execute tool calls
+    results = execute_tool_calls(message.tool_calls)
 
-                # Append tool result
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": function_name,
-                    "content": output,
-                })
+    if not results:
+        state.transition_reason = None
+        return False
 
-        # Loop continues, model will see tool results
+    state.messages.extend(results)
+    state.turn_count += 1
+    state.transition_reason = "tool_result"
+    return True
+
+
+def agent_loop(state: LoopState) -> None:
+    while run_one_turn(state):
+        pass

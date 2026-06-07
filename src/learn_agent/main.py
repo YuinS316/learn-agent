@@ -1,4 +1,18 @@
 from learn_agent.agent_loop import agent_loop
+from learn_agent.loop_state import LoopState
+
+
+def extract_text(content) -> str:
+    """Extract text content from message content."""
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        texts = []
+        for item in content:
+            if item.get("type") == "text":
+                texts.append(item.get("text", ""))
+        return "\n".join(texts).strip()
+    return ""
 
 
 def main():
@@ -17,15 +31,16 @@ def main():
         # Add user message
         history.append({"role": "user", "content": query})
 
-        # Run the agent loop
-        agent_loop(history)
+        state = LoopState(messages=history)
 
-        # Print the model's final text response
-        last_message = history[-1]
-        if last_message.get("role") == "assistant" and last_message.get("content"):
-            print(last_message["content"])
+        # Run the agent loop
+        agent_loop(state)
+
+        final_text = extract_text(history[-1]["content"])
+        if final_text:
+            print(final_text)
         print()
+
 
 if __name__ == '__main__':
     main()
-
