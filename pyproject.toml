@@ -14,3 +14,11 @@ dependencies = [
     "pydantic-settings>=2.11.0",
     "python-dotenv>=1.2.1",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

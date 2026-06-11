@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 
 from learn_agent.config.settings import settings
 from learn_agent.loop_state import LoopState
+
 from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS
+from learn_agent.utils.normalize_messages import normalize_messages
 
 try:
     import readline
@@ -67,7 +69,7 @@ def run_one_turn(state: LoopState) -> bool:
         model=settings.ANTHROPIC_MODEL,
         max_tokens=8000,
         system=SYSTEM,
-        messages=state.messages,
+        messages=normalize_messages(state.messages),
         tools=TOOLS,
     )
 

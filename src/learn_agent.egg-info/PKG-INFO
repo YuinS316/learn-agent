@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: learn-agent
+Version: 0.1.0
+Requires-Python: >=3.12
+Requires-Dist: anthropic>=0.109.1
+Requires-Dist: pydantic-settings>=2.11.0
+Requires-Dist: python-dotenv>=1.2.1
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

@@ -1,0 +1,6 @@
+anthropic>=0.109.1
+pydantic-settings>=2.11.0
+python-dotenv>=1.2.1
+
+[dev]
+pytest>=8.0
