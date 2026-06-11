@@ -12,5 +12,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = ""
 
+    MAX_PLAN_ITEMS: int = 10
+
 
 settings = Settings()

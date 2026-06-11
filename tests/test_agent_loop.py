@@ -34,11 +34,12 @@ class TestExecuteToolUseBlocks:
     def test_executes_known_tool(self):
         from learn_agent.agent_loop import execute_tool_use_blocks
 
+        state = LoopState(messages=[])
         blocks = [
             {"type": "tool_use", "id": "call_1", "name": "bash",
              "input": {"command": "echo hello"}},
         ]
-        results = execute_tool_use_blocks(blocks)
+        results = execute_tool_use_blocks(blocks, state)
         assert len(results) == 1
         assert results[0]["type"] == "tool_result"
         assert results[0]["tool_use_id"] == "call_1"
@@ -47,24 +48,26 @@ class TestExecuteToolUseBlocks:
     def test_unknown_tool_returns_error(self):
         from learn_agent.agent_loop import execute_tool_use_blocks
 
+        state = LoopState(messages=[])
         blocks = [
             {"type": "tool_use", "id": "call_x", "name": "nonexistent_tool",
              "input": {}},
         ]
-        results = execute_tool_use_blocks(blocks)
+        results = execute_tool_use_blocks(blocks, state)
         assert len(results) == 1
         assert "unknown tool" in results[0]["content"].lower()
 
     def test_multiple_tools_executed(self):
         from learn_agent.agent_loop import execute_tool_use_blocks
 
+        state = LoopState(messages=[])
         blocks = [
             {"type": "tool_use", "id": "c1", "name": "bash",
              "input": {"command": "echo a"}},
             {"type": "tool_use", "id": "c2", "name": "bash",
              "input": {"command": "echo b"}},
         ]
-        results = execute_tool_use_blocks(blocks)
+        results = execute_tool_use_blocks(blocks, state)
         assert len(results) == 2
         assert results[0]["tool_use_id"] == "c1"
         assert results[1]["tool_use_id"] == "c2"
@@ -156,7 +159,10 @@ class TestRunOneTurn:
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert "model" in call_kwargs
         assert call_kwargs["max_tokens"] == 8000
-        assert call_kwargs["system"] == agent_loop.SYSTEM
+        # System prompt is dynamically built; verify BASE_SYSTEM content is in there
+        system_prompt = call_kwargs["system"]
+        assert "coding agent" in system_prompt
+        assert "create_plan" in system_prompt
         # Messages passed to API are normalize_messages(state.messages),
         # which is a cleaned copy — just verify the user query is in there
         assert call_kwargs["messages"][0]["role"] == "user"
