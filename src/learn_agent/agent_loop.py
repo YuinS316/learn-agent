@@ -1,7 +1,7 @@
 import os
 import json
 
-from openai import OpenAI
+from anthropic import Anthropic
 from dotenv import load_dotenv
 
 from learn_agent.config.settings import settings
@@ -22,93 +22,90 @@ load_dotenv(".env")
 
 CWD = os.getcwd()
 
-SYSTEM = f"You are a coding agent at {CWD}. Use bash to solve tasks. Act, don't explain."
+SYSTEM = f"You are a coding agent at {CWD}. Use tools to solve tasks. Act, don't explain."
 
-client = OpenAI(
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
+client = Anthropic(
+    api_key=settings.ANTHROPIC_API_KEY,
+    base_url=settings.ANTHROPIC_BASE_URL,
 )
 
 
-def execute_tool_calls(tool_calls) -> list[dict]:
+def execute_tool_use_blocks(tool_use_blocks: list[dict]) -> list[dict]:
+    """Execute tool_use blocks and return tool_result blocks."""
     results = []
 
-    for tool_call in tool_calls:
-        function_name = tool_call.function.name
-        handler = TOOL_HANDLERS.get(function_name)
+    for tu in tool_use_blocks:
+        name = tu["name"]
+        handler = TOOL_HANDLERS.get(name)
         if handler is None:
-            print(f"\033[33m Unknown tool: {function_name} \033[0m")
+            print(f"\033[33m Unknown tool: {name} \033[0m")
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": tu["id"],
+                "content": f"Error: unknown tool '{name}'",
+            })
             continue
 
-        arguments = json.loads(tool_call.function.arguments)
+        tool_input = tu["input"]
+        print(f"\033[33m> {name}({json.dumps(tool_input, ensure_ascii=False)})\033[0m")
 
-        print(f"\033[33m> {function_name}({json.dumps(arguments, ensure_ascii=False)})\033[0m")
-
-        output = handler(**arguments)
+        output = handler(**tool_input)
         print(output[:5000])
         results.append({
-            "role": "tool",
-            "tool_call_id": tool_call.id,
+            "type": "tool_result",
+            "tool_use_id": tu["id"],
             "content": output,
         })
 
     return results
 
+
 def run_one_turn(state: LoopState) -> bool:
     """Run one turn of the agent loop. Returns True if should continue."""
 
-    messages = state.messages
-
-    # Add system message at the beginning if not present
-    if not any(m.get("role") == "system" for m in messages):
-        messages.insert(0, {"role": "system", "content": SYSTEM})
-
-    response = client.chat.completions.create(
-        model=settings.openai_model,
-        messages=messages,
-        tools=TOOLS,
-        tool_choice="auto",
+    response = client.messages.create(
+        model=settings.ANTHROPIC_MODEL,
         max_tokens=8000,
+        system=SYSTEM,
+        messages=state.messages,
+        tools=TOOLS,
     )
 
-    message = response.choices[0].message
+    # Separate text blocks and tool_use blocks from the response
+    text_blocks = []
+    tool_use_blocks = []
+    for block in response.content:
+        if block.type == "text":
+            text_blocks.append({"type": "text", "text": block.text})
+        elif block.type == "tool_use":
+            tool_use_blocks.append({
+                "type": "tool_use",
+                "id": block.id,
+                "name": block.name,
+                "input": block.input,
+            })
 
-    #  It doesn't need to execute tools — save final response and stop
-    if not message.tool_calls:
-        state.messages.append({
-            "role": "assistant",
-            "content": message.content or "",
-        })
-        state.transition_reason = None
-        return False
-
-    # Convert assistant message to dict for storage
-    assistant_dict = {
+    # Build and store the assistant message (Anthropic format)
+    assistant_msg = {
         "role": "assistant",
-        "content": message.content or "",
-        "tool_calls": [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                }
-            }
-            for tc in message.tool_calls
-        ]
+        "content": text_blocks + tool_use_blocks,
     }
+    state.messages.append(assistant_msg)
 
-    state.messages.append(assistant_dict)
-
-    # Execute tool calls
-    results = execute_tool_calls(message.tool_calls)
-
-    if not results:
+    # If the model didn't call any tools, we're done
+    if not tool_use_blocks:
         state.transition_reason = None
         return False
 
-    state.messages.extend(results)
+    # Execute tool calls and collect results
+    tool_results = execute_tool_use_blocks(tool_use_blocks)
+
+    if not tool_results:
+        state.transition_reason = None
+        return False
+
+    # Append tool results as a user message (Anthropic convention)
+    state.messages.append({"role": "user", "content": tool_results})
     state.turn_count += 1
     state.transition_reason = "tool_result"
     return True

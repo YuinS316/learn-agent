@@ -4,7 +4,7 @@ from learn_agent.utils.extract_text import extract_text
 
 
 def main():
-    print("Agent Loop (OpenAI version)")
+    print("Agent Loop (Anthropic version)")
     print("输入问题，回车发送。输入 q 退出。\n")
 
 
