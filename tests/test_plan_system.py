@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import pytest
 from unittest.mock import MagicMock, patch
 from learn_agent.loop_state import LoopState, Plan
+from learn_agent.agent_config import PARENT_AGENT_CONFIG, SUBAGENT_CONFIG
 
 
 # ── _compute_correct_plans tests ─────────────────────────
@@ -160,7 +161,7 @@ class TestBuildSystem:
     def test_base_without_goal_or_plans(self):
         from learn_agent.agent_loop import build_system
         state = LoopState(messages=[])
-        prompt = build_system(state)
+        prompt = build_system(state, PARENT_AGENT_CONFIG)
         assert "coding agent" in prompt
         assert "Goal" not in prompt
         assert "Plan Progress" not in prompt
@@ -168,7 +169,7 @@ class TestBuildSystem:
     def test_with_goal(self):
         from learn_agent.agent_loop import build_system
         state = LoopState(messages=[], goal="Build a web app")
-        prompt = build_system(state)
+        prompt = build_system(state, PARENT_AGENT_CONFIG)
         assert "Build a web app" in prompt
 
     def test_with_plans(self):
@@ -178,7 +179,7 @@ class TestBuildSystem:
             Plan("Step two", "doing", "Second step description"),
             Plan("Step three", "pending", "Third step description"),
         ])
-        prompt = build_system(state)
+        prompt = build_system(state, PARENT_AGENT_CONFIG)
         assert "Plan Progress" in prompt
         assert "Step one" in prompt
         assert "Step two" in prompt
@@ -193,7 +194,7 @@ class TestBuildSystem:
         state = LoopState(messages=[], plans=[
             Plan("bad", "unknown_status", "desc"),
         ])
-        prompt = build_system(state)
+        prompt = build_system(state, PARENT_AGENT_CONFIG)
         assert "❓" in prompt
 
 

@@ -16,6 +16,15 @@ def run_update_plan_status(state: LoopState, plan_index: int, status: str) -> st
     old_status = plan.status
     plan.status = status
 
+    # ── User-visible progress update ────────────────────
+    icon_map = {"pending": "⬜", "doing": "🟡", "done": "✅"}
+    new_icon = icon_map.get(status, "❓")
+    print(f"\n\033[1;35m {new_icon} [{plan_index}] {old_status} → {status}: {plan.content}\033[0m")
+
+    # Print overall progress when starting a new task
+    if status == "doing":
+        print(f"\033[1;33m ⚡ NOW ACTIVE: [{plan_index}] {plan.content}\033[0m\n")
+
     return (
         f"Updated plan[{plan_index}] status: {old_status} → {status}\n"
         f"  Content: {plan.content}"

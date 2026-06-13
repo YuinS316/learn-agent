@@ -6,8 +6,9 @@ from dotenv import load_dotenv
 
 from learn_agent.config.settings import settings
 from learn_agent.loop_state import LoopState
+from learn_agent.agent_config import AgentConfig, PARENT_AGENT_CONFIG
 
-from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS, STATE_TOOLS
+from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS, STATE_TOOLS, filter_tools
 from learn_agent.utils.normalize_messages import normalize_messages
 
 try:
@@ -24,15 +25,6 @@ load_dotenv(".env")
 
 CWD = os.getcwd()
 
-BASE_SYSTEM = (
-    f"You are a coding agent at {CWD}. "
-    "Use tools to solve tasks. Act, don't explain. "
-    "For complex multi-step tasks, use create_plan first, then work through each step "
-    "by updating plan statuses with update_plan_status. "
-    "Always mark the current step 'done' BEFORE starting the next one. "
-    "Only ONE plan item can be 'doing' at a time."
-)
-
 client = Anthropic(
     api_key=settings.ANTHROPIC_API_KEY,
     base_url=settings.ANTHROPIC_BASE_URL,
@@ -41,27 +33,28 @@ client = Anthropic(
 
 # ── Dynamic system prompt ───────────────────────────────────
 
-def build_system(state: LoopState) -> str:
-    """Build the system prompt, injecting current goal and plan progress."""
-    prompt = BASE_SYSTEM
+def build_system(state: LoopState, config: AgentConfig) -> str:
+    """Build the system prompt from config.system_prompt, injecting goal/plan progress."""
+    prompt = config.system_prompt
 
-    if state.goal:
-        prompt += f"\n\n## Goal\n{state.goal}"
+    # Only parent agent gets plan progress injection
+    if config.role == "parent":
+        if state.goal:
+            prompt += f"\n\n## Goal\n{state.goal}"
 
-    if state.plans:
-        prompt += "\n\n## Plan Progress\n"
-        icon_map = {"pending": "⬜", "doing": "🟡", "done": "✅"}
-        for i, p in enumerate(state.plans):
-            icon = icon_map.get(p.status, "❓")
-            prompt += f"{icon} [{i}] ({p.status}) {p.content}: {p.description}\n"
-        prompt += (
-            "\nWork through plans in order. "
-            "Only ONE plan 'doing' at a time. "
-            "Mark current plan 'done' before starting the next."
-        )
+        if state.plans:
+            prompt += "\n\n## Plan Progress\n"
+            icon_map = {"pending": "⬜", "doing": "🟡", "done": "✅"}
+            for i, p in enumerate(state.plans):
+                icon = icon_map.get(p.status, "❓")
+                prompt += f"{icon} [{i}] ({p.status}) {p.content}: {p.description}\n"
+            prompt += (
+                "\nWork through plans in order. "
+                "Only ONE plan 'doing' at a time. "
+                "Mark current plan 'done' before starting the next."
+            )
 
     return prompt
-
 
 # ── Plan progress validation ────────────────────────────────
 
@@ -71,8 +64,6 @@ def _compute_correct_plans(plans: list) -> list:
     n = len(plans)
     corrected = ["pending"] * n
 
-    # Find the last index that was actually 'done' (the valid prefix)
-    # Scan forward: everything up to the first non-done/non-sequential item
     last_done = -1
     doing_found = False
     for i, p in enumerate(plans):
@@ -80,18 +71,13 @@ def _compute_correct_plans(plans: list) -> list:
             last_done = i
         elif p.status == "doing" and not doing_found:
             doing_found = True
-            # This 'doing' is valid — it directly follows the 'done' prefix
         else:
-            # First 'pending' or out-of-order item — stop scanning
             break
 
-    # Apply corrections
     for i in range(n):
         if i <= last_done:
             corrected[i] = "done"
         elif i == last_done + 1:
-            # The plan right after the done zone: keep as 'doing' if model set it,
-            # or 'pending' if model didn't reach it yet
             if not doing_found and plans[i].status == "doing":
                 corrected[i] = "doing"
             elif doing_found:
@@ -105,23 +91,13 @@ def _compute_correct_plans(plans: list) -> list:
 
 
 def validate_plan_progress(state: LoopState) -> str | None:
-    """Validate plan status ordering.
-
-    Rules:
-    1. At most one plan 'doing' at a time.
-    2. Plans must be in order: done(s) → doing(0/1) → pending(s).
-    3. No interleaving (e.g. done → pending → doing).
-
-    If violated, rolls back to the correct state and returns an error message
-    to feed back to the model.
-    """
+    """Validate plan status ordering. Returns violation message if any."""
     if not state.plans:
         return None
 
     plans = state.plans
     corrected_statuses = _compute_correct_plans(plans)
 
-    # Check for violations
     violations = []
     for i, p in enumerate(plans):
         if p.status != corrected_statuses[i]:
@@ -130,7 +106,6 @@ def validate_plan_progress(state: LoopState) -> str | None:
     if not violations:
         return None
 
-    # Apply corrections
     for i, p in enumerate(plans):
         p.status = corrected_statuses[i]
 
@@ -143,10 +118,38 @@ def validate_plan_progress(state: LoopState) -> str | None:
     )
 
 
+# ── Failure tracking ────────────────────────────────────────
+
+def is_tool_error(content: str) -> bool:
+    """Check if a tool result indicates an error."""
+    return content.strip().startswith("Error:")
+
+
+def short_error(content: str, max_len: int = 120) -> str:
+    """Truncate an error message for logging."""
+    return content[:max_len] + ("..." if len(content) > max_len else "")
+
+
+# ── Safety stop ─────────────────────────────────────────────
+
+def append_safety_stop_message(state: LoopState, reason: str) -> None:
+    """Append a safety-stop assistant message to the state."""
+    lines = [f"Stopped safely: {reason}.", ""]
+    if state.failure_log:
+        lines.append("Recent failures:")
+        for f in state.failure_log[-5:]:
+            lines.append(f"- {f}")
+    state.messages.append({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "\n".join(lines)}],
+    })
+
+
 # ── Tool execution ──────────────────────────────────────────
 
 def execute_tool_use_blocks(tool_use_blocks: list[dict],
-                            state: LoopState) -> list[dict]:
+                            state: LoopState,
+                            config: AgentConfig) -> list[dict]:
     """Execute tool_use blocks and return tool_result blocks."""
     results = []
 
@@ -162,14 +165,29 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
             })
             continue
 
+        # Permission check
+        if name not in config.allowed_tool_names:
+            print(f"\033[33m Blocked tool: {name} (not allowed for {config.role}) \033[0m")
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": tu["id"],
+                "content": f"Error: tool '{name}' is not allowed for {config.role}",
+            })
+            continue
+
         tool_input = tu["input"]
+        if not isinstance(tool_input, dict):
+            tool_input = {}
         print(f"\033[33m> {name}({json.dumps(tool_input, ensure_ascii=False)})\033[0m")
 
         # State-modifying tools receive state as first argument
-        if name in STATE_TOOLS:
-            output = handler(state, **tool_input)
-        else:
-            output = handler(**tool_input)
+        try:
+            if name in STATE_TOOLS:
+                output = handler(state, **tool_input)
+            else:
+                output = handler(**tool_input)
+        except TypeError as e:
+            output = f"Error: tool '{name}' received invalid arguments: {e}"
 
         print(output[:5000])
         results.append({
@@ -183,17 +201,17 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
 
 # ── Agent loop core ─────────────────────────────────────────
 
-def run_one_turn(state: LoopState) -> bool:
+def run_one_turn(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) -> bool:
     """Run one turn of the agent loop. Returns True if should continue."""
 
-    system = build_system(state)
+    system = build_system(state, config)
 
     response = client.messages.create(
         model=settings.ANTHROPIC_MODEL,
         max_tokens=8000,
         system=system,
         messages=normalize_messages(state.messages),
-        tools=TOOLS,
+        tools=filter_tools(config.allowed_tool_names),
     )
 
     # Separate text blocks and tool_use blocks from the response
@@ -210,7 +228,7 @@ def run_one_turn(state: LoopState) -> bool:
                 "input": block.input,
             })
 
-    # Build and store the assistant message (Anthropic format)
+    # Build and store the assistant message
     assistant_msg = {
         "role": "assistant",
         "content": text_blocks + tool_use_blocks,
@@ -223,29 +241,48 @@ def run_one_turn(state: LoopState) -> bool:
         return False
 
     # Execute tool calls and collect results
-    tool_results = execute_tool_use_blocks(tool_use_blocks, state)
+    tool_results = execute_tool_use_blocks(tool_use_blocks, state, config)
 
     if not tool_results:
         state.transition_reason = None
         return False
 
-    # ── Validate plan progress after tool execution ───────
-    violation = validate_plan_progress(state)
-    if violation:
-        # Append violation message as an extra tool_result to inform the model
-        tool_results.append({
-            "type": "tool_result",
-            "tool_use_id": "plan_validator",
-            "content": violation,
-        })
+    # ── Failure tracking ────────────────────────────────
+    failed_results = [r for r in tool_results if is_tool_error(r.get("content", ""))]
 
-    # Append tool results as a user message (Anthropic convention)
+    if failed_results:
+        state.failure_count += len(failed_results)
+        state.consecutive_failures += len(failed_results)
+        for r in failed_results:
+            state.failure_log.append(short_error(r["content"]))
+    else:
+        state.consecutive_failures = 0
+
+    # ── Max failures check ──────────────────────────────
+    if state.failure_count >= config.max_failures:
+        state.stopped_reason = "max_failures_exceeded"
+        append_safety_stop_message(state, "max_failures_exceeded")
+        return False
+
+    # Append tool results as a user message
     state.messages.append({"role": "user", "content": tool_results})
     state.turn_count += 1
     state.transition_reason = "tool_result"
+
+    # ── Plan progress validation (parent only) ─────────
+    if config.role == "parent":
+        violation = validate_plan_progress(state)
+        if violation:
+            state.messages.append({"role": "user", "content": violation})
+
     return True
 
 
-def agent_loop(state: LoopState) -> None:
-    while run_one_turn(state):
-        pass
+def agent_loop(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) -> None:
+    while state.turn_count <= config.max_turns:
+        should_continue = run_one_turn(state, config)
+        if not should_continue:
+            return
+
+    state.stopped_reason = "max_turns_exceeded"
+    append_safety_stop_message(state, "max_turns_exceeded")

@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 import pytest
 from unittest.mock import MagicMock, patch, call
 from learn_agent.loop_state import LoopState
+from learn_agent.agent_config import PARENT_AGENT_CONFIG
 
 
 # ── Helpers to simulate Anthropic response blocks ─────────
@@ -39,7 +40,7 @@ class TestExecuteToolUseBlocks:
             {"type": "tool_use", "id": "call_1", "name": "bash",
              "input": {"command": "echo hello"}},
         ]
-        results = execute_tool_use_blocks(blocks, state)
+        results = execute_tool_use_blocks(blocks, state, PARENT_AGENT_CONFIG)
         assert len(results) == 1
         assert results[0]["type"] == "tool_result"
         assert results[0]["tool_use_id"] == "call_1"
@@ -53,7 +54,7 @@ class TestExecuteToolUseBlocks:
             {"type": "tool_use", "id": "call_x", "name": "nonexistent_tool",
              "input": {}},
         ]
-        results = execute_tool_use_blocks(blocks, state)
+        results = execute_tool_use_blocks(blocks, state, PARENT_AGENT_CONFIG)
         assert len(results) == 1
         assert "unknown tool" in results[0]["content"].lower()
 
@@ -67,7 +68,7 @@ class TestExecuteToolUseBlocks:
             {"type": "tool_use", "id": "c2", "name": "bash",
              "input": {"command": "echo b"}},
         ]
-        results = execute_tool_use_blocks(blocks, state)
+        results = execute_tool_use_blocks(blocks, state, PARENT_AGENT_CONFIG)
         assert len(results) == 2
         assert results[0]["tool_use_id"] == "c1"
         assert results[1]["tool_use_id"] == "c2"

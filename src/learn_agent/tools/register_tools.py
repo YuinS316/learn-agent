@@ -5,6 +5,7 @@ from learn_agent.tools.run_edit import run_edit
 from learn_agent.tools.run_glob import run_glob
 from learn_agent.tools.run_create_plan import run_create_plan
 from learn_agent.tools.run_update_plan_status import run_update_plan_status
+from learn_agent.tools.run_delegate_task import run_delegate_task
 
 # ── Tool definitions (Anthropic format) ────────────────────────
 TOOLS = [
@@ -153,12 +154,55 @@ TOOLS = [
             "required": ["plan_index", "status"],
         },
     },
+    {
+        "name": "delegate_task",
+        "description": (
+            "Delegate a read-only information-gathering task to a restricted subagent. "
+            "Use this for focused investigation tasks that can be isolated. "
+            "The subagent can only read files and glob — it cannot write, edit, execute "
+            "commands, or delegate further. "
+            "Summarize all necessary context in the task input; the subagent cannot see "
+            "the parent conversation history."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "The specific information-gathering task for the subagent",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Minimal relevant context summarized by the parent. "
+                                   "Do not pass full conversation history.",
+                },
+                "relevant_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional paths or glob hints the subagent should inspect first",
+                },
+                "output_format": {
+                    "type": "string",
+                    "description": "Expected output format, e.g. bullet summary, file list, "
+                                   "findings with evidence",
+                },
+            },
+            "required": ["task"],
+        },
+    },
 ]
 
+# ── Tool filtering ────────────────────────────────────────────
+
+def filter_tools(allowed: frozenset[str]) -> list[dict]:
+    """Return tool definitions for only the allowed tool names."""
+    return [t for t in TOOLS if t["name"] in allowed]
+
+
 # ── Tool name → handler function ──────────────────────────────
-# State-modifying tools: create_plan, update_plan_status
+# State-modifying tools: create_plan, update_plan_status, delegate_task
 # These handlers receive (state, **tool_input) instead of (**tool_input)
-STATE_TOOLS = {"create_plan", "update_plan_status"}
+STATE_TOOLS = {"create_plan", "update_plan_status", "delegate_task"}
 
 TOOL_HANDLERS = {
     "bash": run_bash,
@@ -168,4 +212,5 @@ TOOL_HANDLERS = {
     "glob": run_glob,
     "create_plan": run_create_plan,
     "update_plan_status": run_update_plan_status,
+    "delegate_task": run_delegate_task,
 }

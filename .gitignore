@@ -5,3 +5,6 @@
 .env
 
 run_agent_output
+
+.agents
+skills-lock.json

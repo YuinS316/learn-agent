@@ -31,6 +31,19 @@ def run_create_plan(state: LoopState, goal: str, plans: list[dict]) -> str:
         parsed[0].status = "doing"
     state.plans = parsed
 
+    # ── User-visible plan overview ──────────────────────
+    icon_map = {"pending": "⬜", "doing": "🟡", "done": "✅"}
+    print(f"\n\033[1;36m{'═' * 60}\033[0m")
+    print(f"\033[1;36m 📋 PLAN CREATED\033[0m")
+    print(f"\033[1;36m{'═' * 60}\033[0m")
+    print(f"  \033[1mGoal:\033[0m {state.goal}")
+    print()
+    for i, p in enumerate(parsed):
+        icon = icon_map.get(p.status, "❓")
+        print(f"  {icon} \033[1m[{i}]\033[0m {p.content}")
+        print(f"     {p.description}")
+    print(f"\033[1;36m{'═' * 60}\033[0m\n")
+
     plan_lines = [
         f"✅ Plan created with {len(parsed)} items:",
         f"Goal: {state.goal}",
