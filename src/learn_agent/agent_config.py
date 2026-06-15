@@ -62,6 +62,7 @@ PARENT_AGENT_CONFIG = AgentConfig(
         "create_plan",
         "update_plan_status",
         "delegate_task",
+        "load_skill",
     }),
     can_delegate=True,
     system_prompt=PARENT_SYSTEM_PROMPT,

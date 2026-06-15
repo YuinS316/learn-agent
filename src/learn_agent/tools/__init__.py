@@ -6,7 +6,7 @@ from learn_agent.tools.run_edit import run_edit
 from learn_agent.tools.run_glob import run_glob
 from learn_agent.tools.run_create_plan import run_create_plan
 from learn_agent.tools.run_update_plan_status import run_update_plan_status
-from learn_agent.tools.run_delegate_task import run_delegate_task
+from learn_agent.tools.run_load_skill import run_load_skill
 
 __all__ = [
     "TOOLS",
@@ -21,4 +21,5 @@ __all__ = [
     "run_create_plan",
     "run_update_plan_status",
     "run_delegate_task",
+    "run_load_skill",
 ]

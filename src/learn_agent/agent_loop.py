@@ -10,6 +10,7 @@ from learn_agent.agent_config import AgentConfig, PARENT_AGENT_CONFIG
 
 from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS, STATE_TOOLS, filter_tools
 from learn_agent.utils.normalize_messages import normalize_messages
+from learn_agent.skill_registry import registry
 
 try:
     import readline
@@ -37,7 +38,7 @@ def build_system(state: LoopState, config: AgentConfig) -> str:
     """Build the system prompt from config.system_prompt, injecting goal/plan progress."""
     prompt = config.system_prompt
 
-    # Only parent agent gets plan progress injection
+    # Only parent agent gets plan progress + skills injection
     if config.role == "parent":
         if state.goal:
             prompt += f"\n\n## Goal\n{state.goal}"
@@ -53,6 +54,9 @@ def build_system(state: LoopState, config: AgentConfig) -> str:
                 "Only ONE plan 'doing' at a time. "
                 "Mark current plan 'done' before starting the next."
             )
+
+        # Inject available skills summary
+        prompt += registry.build_skills_prompt()
 
     return prompt
 
@@ -189,7 +193,7 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
         except TypeError as e:
             output = f"Error: tool '{name}' received invalid arguments: {e}"
 
-        print(output[:5000])
+        # print(output[:5000])
         results.append({
             "type": "tool_result",
             "tool_use_id": tu["id"],

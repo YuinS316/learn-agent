@@ -6,6 +6,7 @@ from learn_agent.tools.run_glob import run_glob
 from learn_agent.tools.run_create_plan import run_create_plan
 from learn_agent.tools.run_update_plan_status import run_update_plan_status
 from learn_agent.tools.run_delegate_task import run_delegate_task
+from learn_agent.tools.run_load_skill import run_load_skill
 
 # ── Tool definitions (Anthropic format) ────────────────────────
 TOOLS = [
@@ -190,6 +191,25 @@ TOOLS = [
             "required": ["task"],
         },
     },
+    {
+        "name": "load_skill",
+        "description": (
+            "Load a skill's full documentation. Skills provide domain-specific "
+            "guidance for tasks like debugging, testing, using git worktrees, etc. "
+            "Use this when the task matches a skill's description — the skill will "
+            "give you a step-by-step process to follow."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name of the skill to load",
+                },
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 # ── Tool filtering ────────────────────────────────────────────
@@ -200,9 +220,9 @@ def filter_tools(allowed: frozenset[str]) -> list[dict]:
 
 
 # ── Tool name → handler function ──────────────────────────────
-# State-modifying tools: create_plan, update_plan_status, delegate_task
+# State-modifying tools: create_plan, update_plan_status, delegate_task, load_skill
 # These handlers receive (state, **tool_input) instead of (**tool_input)
-STATE_TOOLS = {"create_plan", "update_plan_status", "delegate_task"}
+STATE_TOOLS = {"create_plan", "update_plan_status", "delegate_task", "load_skill"}
 
 TOOL_HANDLERS = {
     "bash": run_bash,
@@ -213,4 +233,5 @@ TOOL_HANDLERS = {
     "create_plan": run_create_plan,
     "update_plan_status": run_update_plan_status,
     "delegate_task": run_delegate_task,
+    "load_skill": run_load_skill,
 }
