@@ -11,6 +11,12 @@ from learn_agent.agent_config import AgentConfig, PARENT_AGENT_CONFIG
 from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS, STATE_TOOLS, filter_tools
 from learn_agent.utils.normalize_messages import normalize_messages
 from learn_agent.skill_registry import registry
+from learn_agent.compaction import (
+    apply_l1_compaction,
+    apply_l2_compaction,
+    estimate_context_tokens,
+    transcript_turn,
+)
 
 try:
     import readline
@@ -57,6 +63,22 @@ def build_system(state: LoopState, config: AgentConfig) -> str:
 
         # Inject available skills summary
         prompt += registry.build_skills_prompt()
+
+    # ── Compaction status ──────────────────────
+    if state.compaction_log:
+        recent = state.compaction_log[-3:]
+        prompt += "\n\n## Context Compaction Status\n"
+        for entry in recent:
+            prompt += (
+                f"- L{entry['layer']} at turn {entry['turn']}: "
+                f"saved {entry['saved_tokens']} tokens "
+                f"({entry['before_tokens']} → {entry['after_tokens']})\n"
+            )
+        prompt += (
+            f"Full transcript: .agents/transcripts/{state.session_id}.jsonl\n"
+            f"Cached tool results: use read_file to access.\n"
+            f"Do NOT expose internal cache paths to the user."
+        )
 
     return prompt
 
@@ -193,11 +215,17 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
         except TypeError as e:
             output = f"Error: tool '{name}' received invalid arguments: {e}"
 
-        # print(output[:5000])
+        # ── L1 compaction — cache large results ────────
+        if config.has_compaction_layer("L1"):
+            output, l1_applied = apply_l1_compaction(output, name, tool_input, state)
+        else:
+            l1_applied = False
+
         results.append({
             "type": "tool_result",
             "tool_use_id": tu["id"],
             "content": output,
+            "_l1_compacted": l1_applied,
         })
 
     return results
@@ -210,11 +238,25 @@ def run_one_turn(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) ->
 
     system = build_system(state, config)
 
+    # ── Normalize + L2 compaction ────────────────
+    messages = normalize_messages(state.messages)
+    if config.has_compaction_layer("L2"):
+        # Update token estimate before checking L2 trigger
+        if state.estimated_tokens == 0:
+            try:
+                state.estimated_tokens = estimate_context_tokens(messages, system, client)
+            except Exception:
+                state.estimated_tokens = sum(len(str(m)) // 3 for m in messages) + len(system) // 3
+        try:
+            messages = apply_l2_compaction(messages, state)
+        except Exception:
+            pass  # L2 failure is non-fatal; proceed with uncompacted messages
+
     response = client.messages.create(
         model=settings.ANTHROPIC_MODEL,
         max_tokens=8000,
         system=system,
-        messages=normalize_messages(state.messages),
+        messages=messages,
         tools=filter_tools(config.allowed_tool_names),
     )
 
@@ -238,6 +280,9 @@ def run_one_turn(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) ->
         "content": text_blocks + tool_use_blocks,
     }
     state.messages.append(assistant_msg)
+
+    # ── Transcript: record assistant message ────────
+    transcript_turn(state, assistant_msg)
 
     # If the model didn't call any tools, we're done
     if not tool_use_blocks:
@@ -272,6 +317,20 @@ def run_one_turn(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) ->
     state.messages.append({"role": "user", "content": tool_results})
     state.turn_count += 1
     state.transition_reason = "tool_result"
+
+    # ── Transcript: record tool_result message ─────────
+    transcript_turn(state, {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": r.get("tool_use_id", ""),
+         "content": r.get("content", "")[:500]}
+        for r in tool_results
+    ]})
+
+    # ── Update token estimate ─────────────────────────
+    try:
+        state.estimated_tokens = estimate_context_tokens(
+            normalize_messages(state.messages), build_system(state, config), client)
+    except Exception:
+        state.estimated_tokens = state.estimated_tokens + 4000  # rough fallback
 
     # ── Plan progress validation (parent only) ─────────
     if config.role == "parent":

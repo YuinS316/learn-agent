@@ -44,6 +44,10 @@ class AgentConfig:
     allowed_tool_names: frozenset[str]
     can_delegate: bool = False
     system_prompt: str = ""
+    compaction_layers: frozenset[str] = frozenset()  # {"L1", "L2"}
+
+    def has_compaction_layer(self, layer: str) -> bool:
+        return layer in self.compaction_layers
 
 
 # ── Pre-built configs ───────────────────────────────────────
@@ -66,6 +70,7 @@ PARENT_AGENT_CONFIG = AgentConfig(
     }),
     can_delegate=True,
     system_prompt=PARENT_SYSTEM_PROMPT,
+    compaction_layers=frozenset({"L1", "L2"}),
 )
 
 SUBAGENT_CONFIG = AgentConfig(
@@ -76,4 +81,5 @@ SUBAGENT_CONFIG = AgentConfig(
     allowed_tool_names=frozenset({"glob", "read_file"}),
     can_delegate=False,
     system_prompt=SUBAGENT_SYSTEM_PROMPT,
+    compaction_layers=frozenset({"L1"}),  # short-lived, L2 not needed
 )

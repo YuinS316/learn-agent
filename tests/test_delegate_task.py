@@ -58,13 +58,14 @@ class TestRunDelegateTask:
         from learn_agent.tools.run_delegate_task import run_delegate_task
         from learn_agent import agent_loop
         from learn_agent.tools import register_tools
+        from learn_agent.config.settings import settings
 
-        # Simulate max_turns exceeded by making model always return tool_use.
-        # SUBAGENT_CONFIG.max_turns == 6, so provide 6 tool_use responses then a text.
+        # Simulate max_turns exceeded: provide enough tool_use to exceed max_turns.
+        n = settings.SUBAGENT_MAX_TURNS + 1  # one more than allowed
         many_responses = [
             FakeResponse([FakeToolUseBlock(f"t{i}", "glob", {"pattern": "*.py"})])
-            for i in range(6)
-        ] + [FakeResponse([FakeTextBlock("final")])]
+            for i in range(n)
+        ]
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = many_responses
 

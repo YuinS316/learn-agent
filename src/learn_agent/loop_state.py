@@ -22,6 +22,11 @@ class LoopState:
     failure_log: list[str] = field(default_factory=list)
     stopped_reason: str | None = None
 
+    # ── Compaction / Session tracking ──────────
+    session_id: str = ""
+    estimated_tokens: int = 0
+    compaction_log: list[dict] = field(default_factory=list)
+
     def plan_snapshot(self) -> list[Plan] | None:
         """Return a deep copy of plans for rollback purposes."""
         return copy.deepcopy(self.plans) if self.plans else None
@@ -37,6 +42,7 @@ class LoopState:
         Used when reusing a LoopState across retry attempts or when
         failure-recovery requires a clean slate.
         Does NOT clear messages (the conversation history).
+        Does NOT clear session_id (session identity persists).
         """
         self.turn_count = 1
         self.transition_reason = None
@@ -46,3 +52,5 @@ class LoopState:
         self.consecutive_failures = 0
         self.failure_log.clear()
         self.stopped_reason = None
+        self.estimated_tokens = 0
+        self.compaction_log.clear()

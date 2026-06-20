@@ -2,6 +2,7 @@ from learn_agent.agent_loop import agent_loop
 from learn_agent.loop_state import LoopState
 from learn_agent.utils.extract_text import extract_text
 from learn_agent.skill_registry import registry
+from learn_agent.compaction import generate_session_id
 
 
 def main():
@@ -12,7 +13,7 @@ def main():
         names = "\n".join(list[0: 3])
         if len(list) > 3:
             names += "\n..."
-        print(f"\033[1;36m📦 Loaded {n} skills: \n"
+        print(f"\033[1;36m📦 Find {n} skills: \n"
               f"{names}"
               f"\033[0m\n"
               )
@@ -20,6 +21,9 @@ def main():
     print("Agent Loop (Anthropic version)")
     print("输入问题，回车发送。输入 q 退出。\n")
 
+
+    session_id = generate_session_id()
+    print(f"Session: {session_id}")
 
     history = []
     while True:
@@ -33,7 +37,7 @@ def main():
         # Add user message
         history.append({"role": "user", "content": query})
 
-        state = LoopState(messages=history)
+        state = LoopState(messages=history, session_id=session_id)
 
         # Run the agent loop
         agent_loop(state)
