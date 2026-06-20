@@ -17,6 +17,7 @@ from learn_agent.compaction import (
     estimate_context_tokens,
     transcript_turn,
 )
+from learn_agent.hook_system import HookContext, HookStage, hook_registry
 
 try:
     import readline
@@ -204,6 +205,29 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
         tool_input = tu["input"]
         if not isinstance(tool_input, dict):
             tool_input = {}
+
+        # ── PRE_TOOL_USE hook ──────────────────────────
+        pre_ctx = HookContext(
+            stage=HookStage.PRE_TOOL_USE,
+            state=state,
+            config=config,
+            data={"tool_name": name, "tool_input": dict(tool_input)},
+        )
+        pre_result = hook_registry.fire(HookStage.PRE_TOOL_USE, pre_ctx)
+        if pre_result is False:
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": tu["id"],
+                "content": (
+                    f"Error: tool '{name}' was blocked by PreToolUse hook. "
+                    f"A hook returned False to prevent execution. "
+                    f"Try a different approach or ask the user for guidance."
+                ),
+            })
+            continue
+        if isinstance(pre_result, HookContext):
+            tool_input = pre_result.data.get("tool_input", tool_input)
+
         print(f"\033[33m> {name}({json.dumps(tool_input, ensure_ascii=False)})\033[0m")
 
         # State-modifying tools receive state as first argument
@@ -220,6 +244,17 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
             output, l1_applied = apply_l1_compaction(output, name, tool_input, state)
         else:
             l1_applied = False
+
+        # ── POST_TOOL_USE hook ─────────────────────────
+        post_ctx = HookContext(
+            stage=HookStage.POST_TOOL_USE,
+            state=state,
+            config=config,
+            data={"tool_name": name, "tool_input": tool_input, "result": output},
+        )
+        post_result = hook_registry.fire(HookStage.POST_TOOL_USE, post_ctx)
+        if isinstance(post_result, HookContext):
+            output = post_result.data.get("result", output)
 
         results.append({
             "type": "tool_result",
@@ -345,7 +380,19 @@ def agent_loop(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) -> N
     while state.turn_count <= config.max_turns:
         should_continue = run_one_turn(state, config)
         if not should_continue:
-            return
+            break
 
-    state.stopped_reason = "max_turns_exceeded"
-    append_safety_stop_message(state, "max_turns_exceeded")
+    # Handle max_turns if that's why we exited
+    if state.turn_count > config.max_turns and not state.stopped_reason:
+        state.stopped_reason = "max_turns_exceeded"
+        append_safety_stop_message(state, "max_turns_exceeded")
+
+    # ── STOP hook (unified exit point) ────────────────
+    reason = state.stopped_reason or "normal"
+    stop_ctx = HookContext(
+        stage=HookStage.STOP,
+        state=state,
+        config=config,
+        data={"reason": reason},
+    )
+    hook_registry.fire(HookStage.STOP, stop_ctx)
