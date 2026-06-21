@@ -12,8 +12,6 @@ from learn_agent.tools.register_tools import TOOLS, TOOL_HANDLERS, STATE_TOOLS, 
 from learn_agent.utils.normalize_messages import normalize_messages
 from learn_agent.skill_registry import registry
 from learn_agent.compaction import (
-    apply_l1_compaction,
-    apply_l2_compaction,
     estimate_context_tokens,
     transcript_turn,
 )
@@ -239,13 +237,7 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
         except TypeError as e:
             output = f"Error: tool '{name}' received invalid arguments: {e}"
 
-        # ── L1 compaction — cache large results ────────
-        if config.has_compaction_layer("L1"):
-            output, l1_applied = apply_l1_compaction(output, name, tool_input, state)
-        else:
-            l1_applied = False
-
-        # ── POST_TOOL_USE hook ─────────────────────────
+        # ── POST_TOOL_USE hook (includes L1 compaction) ─
         post_ctx = HookContext(
             stage=HookStage.POST_TOOL_USE,
             state=state,
@@ -255,6 +247,9 @@ def execute_tool_use_blocks(tool_use_blocks: list[dict],
         post_result = hook_registry.fire(HookStage.POST_TOOL_USE, post_ctx)
         if isinstance(post_result, HookContext):
             output = post_result.data.get("result", output)
+            l1_applied = post_result.data.get("l1_compacted", False)
+        else:
+            l1_applied = False
 
         results.append({
             "type": "tool_result",
@@ -273,19 +268,18 @@ def run_one_turn(state: LoopState, config: AgentConfig = PARENT_AGENT_CONFIG) ->
 
     system = build_system(state, config)
 
-    # ── Normalize + L2 compaction ────────────────
+    # ── Normalize + PRE_API_CALL hook (includes L2 compaction) ──
     messages = normalize_messages(state.messages)
-    if config.has_compaction_layer("L2"):
-        # Update token estimate before checking L2 trigger
-        if state.estimated_tokens == 0:
-            try:
-                state.estimated_tokens = estimate_context_tokens(messages, system, client)
-            except Exception:
-                state.estimated_tokens = sum(len(str(m)) // 3 for m in messages) + len(system) // 3
-        try:
-            messages = apply_l2_compaction(messages, state)
-        except Exception:
-            pass  # L2 failure is non-fatal; proceed with uncompacted messages
+
+    pre_api_ctx = HookContext(
+        stage=HookStage.PRE_API_CALL,
+        state=state,
+        config=config,
+        data={"messages": messages, "system": system},
+    )
+    pre_api_result = hook_registry.fire(HookStage.PRE_API_CALL, pre_api_ctx)
+    if isinstance(pre_api_result, HookContext):
+        messages = pre_api_result.data.get("messages", messages)
 
     response = client.messages.create(
         model=settings.ANTHROPIC_MODEL,

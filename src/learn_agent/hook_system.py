@@ -1,12 +1,14 @@
 """Global hook system for agent lifecycle interception.
 
-Six hook stages (see docs/2026-06-21-hooks.md):
+Eight hook stages (see docs/2026-06-21-hooks.md):
+- AGENT_STARTUP      — once at program start, before any user prompt
 - USER_PROMPT_SUBMIT — user submits prompt, before agent loop
-- PRE_TOOL_USE      — before tool handler executes
-- POST_TOOL_USE     — after tool handler returns + L1 compaction
-- SUBAGENT_START    — subagent dispatched, before its agent loop
-- SUBAGENT_STOP     — subagent returns, after its agent loop
-- STOP              — agent loop exiting (unified exit point)
+- PRE_API_CALL       — before client.messages.create()
+- PRE_TOOL_USE       — before tool handler executes
+- POST_TOOL_USE      — after tool handler returns
+- SUBAGENT_START     — subagent dispatched, before its agent loop
+- SUBAGENT_STOP      — subagent returns, after its agent loop
+- STOP               — agent loop exiting (unified exit point)
 
 Hooks are global: they fire for both parent and subagent.
 Use ctx.config.role to distinguish ("parent" | "subagent").
@@ -25,7 +27,9 @@ from learn_agent.loop_state import LoopState
 # ── Stage enum ─────────────────────────────────────────────────
 
 class HookStage(Enum):
+    AGENT_STARTUP = "agent_startup"        # once, before any user prompt
     USER_PROMPT_SUBMIT = "user_prompt_submit"
+    PRE_API_CALL = "pre_api_call"          # before client.messages.create()
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
     SUBAGENT_START = "subagent_start"

@@ -5,5 +5,6 @@ Requires-Python: >=3.12
 Requires-Dist: anthropic>=0.109.1
 Requires-Dist: pydantic-settings>=2.11.0
 Requires-Dist: python-dotenv>=1.2.1
+Requires-Dist: socksio>=1.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
